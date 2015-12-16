@@ -15,6 +15,8 @@ The goal of this research was to examine potential models for Health First's Pro
 
 Future research could use a more diverse range of richer data sources that relate specificially to the chronic conditions Health First wishes to insure but this introductory research should provide a framework for integrating that data.
 
+Future model building would involve applying machine learning and big data algorithms to these richer data sources to allow the building of very robust models for provider compensation that "priced in" as many key factors as the data provided to reach the broader concepts discussed below.
+
 ##Exploratory Analysis
 
 Medicare's data was clean and most easy to match up based on Provider ID / Provider Number. All NA data was removed to simplify analysis. Data from 2014-2015 was used to reduce analysis scope. See Appendix 1 for data cleaning code.
@@ -71,6 +73,11 @@ if (!exists('merged')) {
   valueCareSpending <- inner_join(spendingPerPatient, valueOfCare, by="Provider.ID")
   
   readmissionSpendingScore <- inner_join(spendingPerPatient, readmissionTotal, by="Provider.ID")
+  
+  efficiencyScore <- totalPerformanceScore %>% 
+  arrange(Hospital.Name) %>%
+  filter(domain.type=='Weighted.Efficiency.Domain.Score') %>%
+  transform(Hospital.Name = reorder(Hospital.Name, domain.score)) 
 }
 ```
 
@@ -81,12 +88,15 @@ readmissionModel <- lm(Score~READM_SCORE,data=readmissionSpendingScore)
 summary(readmissionModel)
 ```
 
-This data is plotted below.
+This data is plotted below. The data and the associate P-Value confirm that there is a clear correlation between Readmissions and MSRP score.
 
 ```{r readmissionScoreBeneficiaryScoreGraph, echo=FALSE, message=FALSE, warning=FALSE}
 ggplot(readmissionSpendingScore, aes(x=READM_SCORE, y=Score)) + 
   geom_point() + 
-  geom_smooth(method="lm")
+  geom_smooth(method="lm") +
+  xlab("Readmission Score") +
+  ylab("MSPB Score") +
+  ggtitle("Medicare Spending Per Beneficiary and Readmissions")
 ```
 
 We next wanted to explore how Medicare links payment to quality: 
@@ -95,36 +105,31 @@ We next wanted to explore how Medicare links payment to quality:
 
 > The adjusts hospitals’ payments based on their performance on four domains that reflect hospital quality: the Clinical Process of Care Domain, the Patient Experience of Care domain, the Outcome domain, and the Efficiency domain. The Total Performance Score (TPS) is comprised of the Clinical Process of Care domain score (weighted as 20% of the TPS), the Patient Experience of Care domain score (weighted as 30% of the TPS), the Outcome domain score (weighted as 30% of the TPS), and the Efficiency domain score (weighted as 20% of the TPS).
 
-Below are the top 25 Florida Hospitals scored using this 4-measure, weighted system. Full hospital data is stored in variable "totalPerformanceScore". Minimum score was, `r min(totalPerformanceScore$Total.Performance.Score)`, maximum score was, `r max(totalPerformanceScore$Total.Performance.Score)`.
+Below are the top 25 Florida Hospitals scored using this 4-measure, weighted system. Full hospital data is stored in variable "totalPerformanceScore". Minimum score was, **`r round(min(totalPerformanceScore$Total.Performance.Score),1)`**, maximum score was, **`r round(max(totalPerformanceScore$Total.Performance.Score),1)`**.
 
 ```{r totalPerformance, echo=FALSE, warning=FALSE}
 set.seed(40)
 totalPerformanceScorePlot <- totalPerformanceScore %>% 
   arrange(Hospital.Name) %>%
-  top_n(100, Hospital.Name) %>%
-  filter(domain.type=='Weighted.Efficiency.Domain.Score')
+  top_n(100, Hospital.Name)
 
 ggplot(totalPerformanceScorePlot, aes(x=Hospital.Name, y=domain.score)) + 
   geom_bar(binwidth=1,aes(fill=domain.type),stat="identity") + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   scale_fill_discrete(name = "Domain", labels = c("Experience of Care", "Clinical Process of Care", "Outcome", "Efficiency")) + 
-  xlab("Hospital Name") + ylab("Domain Score") + 
+  xlab("Hospital Name") + ylab("Total Performance Score (by domain)") + 
   ggtitle("Top 25 Florida Hospitals Total Performance Score (Weighted)")
 ```
 
-We also looked into the part of the evaluation that is explicitly tied to efficiency as we felt this was an import piece of our evaluation. `r table(efficiencyScore$domain.score)[1]` of `r nrow(efficiencyScore)` have an efficiency score of zero the results for the rest are plotted below.
 
-```{r efficiency score}
-efficiencyScore <- totalPerformanceScore %>% 
-  arrange(Hospital.Name) %>%
-  filter(domain.type=='Weighted.Efficiency.Domain.Score') %>%
-  transform(Hospital.Name = reorder(Hospital.Name, domain.score)) 
-
+```{r efficiency score, echo=FALSE, warning=FALSE}
 efficiencyScorePlot <- top_n(efficiencyScore, 57, Hospital.Name)
 
 ggplot(efficiencyScorePlot, aes(x=Hospital.Name, y=domain.score)) +
   geom_bar(binwidth=1,stat="identity") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab("Hospital Name") + ylab("Efficiency Score") + 
+  ggtitle("Florida Hospitals Efficiency Score (Score>0)")
 ```
 
 ##Models
@@ -133,13 +138,13 @@ We came up and created several models for additional provider care
 
 ###Basic Compensation Model
 
-Base compensation is linked to Overall Provider Quality (Clinical Process of Care Domain, the Patient Experience of Care domain, the Outcome domain, and the Efficiency domain). These figures could be compared to national,state, or local geographic averages. The average Florida provider score was `r round(mean(totalPerformanceScore$Total.Performance.Score),1)`. 
+Base compensation is linked to Overall Provider Quality (Clinical Process of Care Domain, the Patient Experience of Care domain, the Outcome domain, and the Efficiency domain). These figures could be compared to national, state, or local geographic averages. The average Florida provider score was **`r round(mean(totalPerformanceScore$Total.Performance.Score),1)`**. 
 
 In order to prevent adverse selection consequences such as the best providers having the lowest rates and the highest quality of care copays/deductibles would be standardized across providers with the best providers getting to keep a larger piece of the copay and the worst providers keeping a lower percentage.
 
 As an example, our base hospital has a 50:50 split on all network patient copays/deductibles with the network insurer. Assuming a $100 copay our mean insurer would be compensated $50.
 
-The worst provider in our pool would receive:
+The worst provider in our pool would receive (out of $100):
 
 ```{r worstProvider}
 baseCompensation <- 0.5
@@ -164,6 +169,7 @@ More advanced versions of this model could use multiple years of historical scor
 A variant to the above compensation solution would be to rank hospitals by tiers (national, state, regional). This approach has the benefit that hospitals can be motivated to improve their rank by improving their score to predefined/periodically defined threshold. 
 
 At a state level this could be as straightforward as determining the decile thresholds for the previous years performance and compensating each provider for the coming year based on where they fall by a fixed percentage say 5%.
+
 ```{r decileModel}
 quantile(totalPerformanceScore$Total.Performance.Score,probs=seq(0,1,0.1))
 ```
@@ -174,8 +180,53 @@ On a more granular level hospitals could be ranked and compensated according to 
 
 ###Efficiency-linked Compensation Incentives
 
-Whereas our previous model suggested a method for establishing base compensation there would ideally be a variable piece of each provider's compensation that would be linked to efficiency since this is the one element in the overall compensation model that directly effects the insurer's balance sheet. Efficiency bonuses could be provided
+Whereas our previous model suggested a method for establishing base compensation there would ideally be a variable piece of each provider's compensation that would be linked to efficiency since this is the one element in the overall compensation model that directly effects the insurer's balance sheet.
 
+Having a variable bonus to each provider's base compensation would also provide an incentive for providers to continue to provide value.
+
+Efficiency bonuses could be provided as Medicare does by a negative adjustment to provider's compensation or as a positive adjustment. Medicare uses readmissions for thirty days after intiial treatment to determine readmissions. This methodology could be adjusted to incorporate readmissions associated with specific hospitalizations for chronic conditions and independent scores calcualted for each hospital on the different chronic conditions they treated.
+
+The formula used for readmission reduction is: 
+**(Base operating DRG payment amount x readmissions adjustment factor) - base operating DRG payment amount**. 
+
+This is calculated with readmission adjustment factor being 1-readmission ratio *(Aggregate payments for excess readmissions/ Aggregate payments for all discharges)* for a positive adjustment the would be: 
+**(Base operating DRG payment amount x readmissions adjustment ratio) + base operating DRG payment amount**.
+
+One particular strength of this approach is that it can be done on a condition by condition basis which can then be aggregated to an overall score.
+
+####Variant: Bonus Pool
+
+Instead of a bonus based directly on the costs of excess readmissions another option is to compensate providers who improve their efficiency by giving them a portion of a pre-determined bonus pool.
+
+The advantage of this approach is that the overall amount of bonuses paid to providers is fixed.
+
+In it's simplest form each provider that meets a certain minimum threshold for efficiency improvements divides the bonus pool evenly with each other provider that meets the minimum threshold for efficiency improvements.
+
+As this formula, benefits low-performing hospitals who improve from a low base, it is probably preferable to scale the threshold so high-performing hospitals need to make smaller absolute improvements to meet the threshold. 
+
+Another variant is to provide multiple improvement thresholds so some providers who cross multiple efficiency improvement thresholds receive multiple "shares" in the bonus pool.
+
+###Additional Non-Financial Incentives
+
+####Performance Profiling
+
+Given the ease of generating real-time dashboards and reports one option to improve provider performance is to provide visibility for providers and patients into performance and efficiency of competing providers. This transparency provides clear benchmarks for providers to aim for in improving their performance.
+
+####Technical Assistance
+
+Insurers could provide technical assistance to providers directly to help them improve their efficiency and quality of care.
+
+This approach requires concrete, immediate costs with unknown, future benefit. Despite this using longitudinal data, RCTs, and comparisons between similar providers it might be possible to look into what technical assistance helps providers improve performance. Ultimately the insurer would benefit if technical improvements could prove to improve readmissions on a cost plus basis.
+
+Although it offers no immediate benefit and any benefits that accrue might be difficult to quantatize.
+
+###Next Steps
+
+The exploratory data analysis and modeling presented here provide a number of potential models for provider compensation and incentives. 
+
+The next step would be to start working with the real-world data available. Once this data is cleaned and combined it would be possible to start creating aggregate metrics for Overall Performance and Efficiency building on what our research uncovered.
+
+After this it would be possible to build and test several of our hypothetical models simultaneously with real payment and performance data and refine these models to maximize their utility to Health First.
 
 ##Appendices
 
@@ -189,6 +240,7 @@ library(rpart)
 library(rpart.plot)
 library(knitr)
 library(kfigr)
+library(scales)
 
 if (!file.exists('Hospital_Revised_Flatfiles.zip')) {
   download.file('https://data.medicare.gov/views/bg9k-emty/files/Ma46xU4I05xsIKuEqLLi-N-s7GoO2ZefzJ7SYyTIKjA?content_type=application%2Fzip%3B%20charset%3Dbinary&filename=Hospital_Revised_Flatfiles.zip','Hospital_Revised_Flatfiles.zip',method='curl')
@@ -202,7 +254,7 @@ if (!file.exists('raw')) {
 if (!exists('merged')) {
   readmissionsMortality <- tbl_df(read.csv('raw/Readmissions and Deaths - Hospital.csv', stringsAsFactors = FALSE, header = TRUE, na.strings=c("Not Available","Too Few To Report")))
   readmissionsMortality <- readmissionsMortality %>% select(one_of(c("Provider.ID","Measure.ID","Score"))) %>% 
-    na.omit() %>% mutate(Provider.ID=as.character(Provider.ID))
+    na.omit() %>% mutate(Provider.ID=as.integer(Provider.ID))
   
   readmissionHipKnee <- subset(readmissionsMortality, Measure.ID=='READM_30_HIP_KNEE')
   readmissionTotal <- subset(readmissionsMortality, Measure.ID=='READM_30_HOSP_WIDE')
@@ -212,9 +264,9 @@ if (!exists('merged')) {
 
   totalPerformanceScore <- tbl_df(read.csv('raw/hvbp_tps_08_06_2015.csv', stringsAsFactors = FALSE, header = TRUE, na.strings=c("Not Available","Too Few To Report")))
   totalPerformanceScore <- totalPerformanceScore %>% 
-    select(one_of(c("Provider.Number","Weighted.Patient.Experience.of.Care.Domain.Score", "Weighted.Clinical.Process.of.Care.Domain.Score","Weighted.Outcome.Domain.Score","Weighted.Efficiency.Domain.Score","Hospital.Name","Total.Performance.Score","State"))) %>% 
+    select(one_of(c("Provider.Number","Weighted.Patient.Experience.of.Care.Domain.Score", "Weighted.Clinical.Process.of.Care.Domain.Score","Weighted.Outcome.Domain.Score","Weighted.Efficiency.Domain.Score","Hospital.Name","Total.Performance.Score","State", "Zip.Code"))) %>% 
     na.omit() %>% 
-    mutate(Provider.Number=as.character(Provider.Number)) %>% 
+    mutate(Provider.Number=as.integer(Provider.Number)) %>% 
     group_by(State) %>% 
     filter(State=='FL') %>%
     gather(domain.type,domain.score, Weighted.Patient.Experience.of.Care.Domain.Score, Weighted.Clinical.Process.of.Care.Domain.Score, Weighted.Outcome.Domain.Score, Weighted.Efficiency.Domain.Score) %>%
@@ -222,7 +274,7 @@ if (!exists('merged')) {
 
   valueOfCare <- tbl_df(read.csv('raw/Payment and Value of Care - Hospital.csv', stringsAsFactors = FALSE, header = TRUE, na.strings=c("Not Available","Too Few To Report")))
   valueOfCare <- valueOfCare %>% select(one_of(c("Provider.ID","Value.of.care.display.name","Value.of.care.category","Payment.category"))) %>% 
-    na.omit() %>% mutate(Provider.ID=as.character(Provider.ID))
+    na.omit() %>% mutate(Provider.ID=as.integer(Provider.ID))
   
   spendingPerPatient <- tbl_df(read.csv('raw/Medicare Hospital Spending per Patient - Hospital.csv', stringsAsFactors = FALSE, header = TRUE, na.strings=c("Not Available","Too Few To Report")))
   spendingPerPatient <- spendingPerPatient %>% select(one_of(c("Provider.ID","Hospital.Name","City","State","ZIP.Code","County.Name","Score"))) %>% 
@@ -231,5 +283,42 @@ if (!exists('merged')) {
   valueCareSpending <- inner_join(spendingPerPatient, valueOfCare, by="Provider.ID")
   
   readmissionSpendingScore <- inner_join(spendingPerPatient, readmissionTotal, by="Provider.ID")
+  
+  efficiencyScore <- totalPerformanceScore %>% 
+  arrange(Hospital.Name) %>%
+  filter(domain.type=='Weighted.Efficiency.Domain.Score') %>%
+  transform(Hospital.Name = reorder(Hospital.Name, domain.score)) 
 }
 ```
+
+###Appendix 2
+
+[Source](https://www.cms.gov/medicare/medicare-fee-for-service-payment/acuteinpatientpps/readmissions-reduction-program.html)
+
+####Formulas to Calculate the Readmission Adjustment Factor
+
+Excess readmission ratio = risk-adjusted predicted readmissions/risk-adjusted expected readmissions
+
+Aggregate payments for excess readmissions = [sum of base operating DRG payments for AMI x (excess readmission ratio for AMI-1)] + [sum of base operating DRG payments for HF x (excess readmission ratio for HF-1)] + [sum of base operating DRG payments for PN x (excess readmission ratio for PN-1)] + [sum of base operating DRG payments for COPD x (excess readmission ratio for COPD-1)] + [sum of base operating payments for THA/TKA x (excess readmission ratio for THA/TKA -1)]
+
+*Note, if a hospital’s excess readmission ratio for a condition is less than/equal to 1, then there are no aggregate payments for excess readmissions for that condition included in this calculation.
+
+Aggregate payments for all discharges = sum of base operating DRG payments for all discharges
+
+Ratio = 1 - (Aggregate payments for excess readmissions/ Aggregate payments for all discharges)
+
+Readmissions Adjustment Factor = the higher of the Ratio or 0.97 (3% reduction). 
+(For FY 2013, the higher of the Ratio or 0.99% (1% reduction), and for FY 2014, the higher of the Ratio or 0.98% (2% reduction).)
+
+####Formulas to Compute the Readmission Payment Adjustment Amount
+
+Wage-adjusted DRG operating amount* = DRG weight x [(labor share x wage index) + (non-labor share x cola, if applicable)]
+
+*Note, If the case is subject to the transfer policy, then this amount includes an applicable payment adjustment for transfers under § 412.4(f).
+
+Base Operating DRG Payment Amount = Wage-adjusted DRG operating amount + new technology payment, if applicable.
+
+Readmissions Payment Adjustment Amount = [Base operating DRG payment amount x readmissions adjustment factor] - base operating DRG payment amount.
+
+*The readmissions adjustment factor is always less than 1.0000, therefore, the readmissions payment adjustment amount will always be a negative amount (i.e., a payment reduction).
+
