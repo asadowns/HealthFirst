@@ -56,6 +56,9 @@ if (!exists('merged')) {
   valueCareSpending <- inner_join(spendingPerPatient, valueOfCare, by="Provider.ID")
   
   readmissionSpendingScore <- inner_join(spendingPerPatient, readmissionTotal, by="Provider.ID")
+  totalPerformanceReadmissionSpendingScore <- inner_join(readmissionSpendingScore, totalPerformanceScore, by=c("Provider.ID" = "Provider.Number"))
+  
+  
 }
 #Readmission Score vs. Medicare Spending Per Beneficiary score
 ggplot(readmissionSpendingScore, aes(x=READM_SCORE, y=Score)) + 
@@ -102,3 +105,21 @@ ggplot(readmissionHipKnee,aes(x=Denominator, y=Score))+geom_point(aes(colour=Com
 ggplot(readmissionTotal,aes(x=Denominator, y=READM_SCORE))+geom_point(aes(colour=Compared.to.National))
 
 with(totalPerformanceScore,dotchart(Total.Performance.Score[State=="FL"],Hospital.Name[State=="FL"]))
+
+readmissionModel <- lm(Score~READM_SCORE,data=readmissionSpendingScore)
+summary(readmissionModel)
+
+
+var(totalPerformanceScore$Weighted.Patient.Experience.of.Care.Domain.Score)
+var(totalPerformanceScore$Weighted.Clinical.Process.of.Care.Domain.Score)
+var(totalPerformanceScore$Weighted.Efficiency.Domain.Score)
+var(totalPerformanceScore$Weighted.Outcome.Domain.Score)
+cor(totalPerformanceScore$Weighted.Patient.Experience.of.Care.Domain.Score,totalPerformanceScore$Weighted.Clinical.Process.of.Care.Domain.Score)
+cor(totalPerformanceScore$Weighted.Patient.Experience.of.Care.Domain.Score,totalPerformanceScore$Weighted.Efficiency.Domain.Score)
+cor(totalPerformanceScore$Weighted.Clinical.Process.of.Care.Domain.Score, totalPerformanceScore$Weighted.Efficiency.Domain.Score)
+
+fit1 <- lm(Score~Efficiency,totalPerformanceReadmissionSpendingScore)
+fit2 <- lm(Score~Efficiency+READM_SCORE,totalPerformanceReadmissionSpendingScore)
+fit3 <- lm(Score~Efficiency+READM_SCORE+Patient,totalPerformanceReadmissionSpendingScore)
+fit4 <- lm(Score~Efficiency+READM_SCORE+Patient+Process+Outcome,totalPerformanceReadmissionSpendingScore)
+
